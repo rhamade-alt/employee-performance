@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stok'd Analytics - Multi-SKU Selector</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; line-height: 1.6; max-width: 1200px; margin: 20px auto; padding: 0 20px; background-color: #f4f7f6; color: #2d3436; }
+        .card { background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); margin-bottom: 20px; border: 1px solid #e9ecef; }
+        h1 { text-align: center; font-weight: 800; margin-bottom: 5px; }
+        .date-range { text-align: center; color: #636e72; margin-bottom: 20px; font-weight: 500; }
+        h2 { color: #0984e3; font-size: 0.95rem; text-transform: uppercase; border-bottom: 2px solid #f1f2f6; padding-bottom: 10px; margin-bottom: 15px; }
+        .btn-export { background-color: #27ae60; color: white; padding: 12px 20px; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; display: block; width: 100%; margin-top: 10px; }
+        .search-box { width: 100%; padding: 12px; border: 2px solid #3498db; border-radius: 8px; margin-bottom: 10px; font-size: 1rem; box-sizing: border-box; }
+        
+        /* Checkbox List Styling */
+        #skuContainer { height: 300px; overflow-y: auto; border: 1px solid #dfe6e9; border-radius: 8px; padding: 10px; background: #fff; }
+        .sku-item { display: flex; align-items: flex-start; padding: 6px; border-bottom: 1px solid #f9f9f9; font-size: 0.85rem; cursor: pointer; }
+        .sku-item:hover { background: #f1f9ff; }
+        .sku-item input { width: auto; margin-right: 10px; margin-top: 3px; cursor: pointer; }
+        .sku-item label { cursor: pointer; flex: 1; }
+
+        .highlight-box { background: #2d3436; color: white; padding: 15px; border-radius: 10px; text-align: center; margin-top: 20px; }
+        .highlight-box span { display: block; font-size: 2.2em; font-weight: 800; color: #00cec9; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { text-align: left; padding: 10px; border-bottom: 1px solid #f1f2f6; font-size: 0.9rem; }
+        .badge { background: #dfe6e9; padding: 4px 8px; border-radius: 6px; font-weight: 700; }
+        .gold { background: #ffeaa7; color: #d35400; }
+        .hidden { display: none; }
+        .grid { display: grid; grid-template-columns: 1.4fr 1fr; gap: 20px; }
+        .stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 15px; text-align: center; }
+        .stat-item { background: #f8f9fa; padding: 8px; border-radius: 8px; }
+        .stat-val { display: block; font-size: 1.1rem; font-weight: 800; }
+        .stat-lbl { font-size: 0.6rem; color: #b2bec3; text-transform: uppercase; }
+    </style>
+</head>
+<body>
+
+    <h1>Stok'd Analytics</h1>
+    <div id="dateRange" class="date-range">Upload your CSV to begin</div>
+
+    <div class="card">
+        <h2>1. Management</h2>
+        <input type="file" id="csvFile" accept=".csv" style="margin-bottom: 10px;">
+        <button id="exportBtn" class="btn-export hidden">Export Employee Stats to CSV</button>
+    </div>
+
+    <div id="toolContent" class="hidden">
+        <div class="grid">
+            <div class="card">
+                <h2>2. Multi-Product Selector</h2>
+                <input type="text" id="skuSearch" class="search-box" placeholder="Filter by Name or SKU...">
+                
+                <div style="margin-bottom: 10px; padding-left: 5px;">
+                    <input type="checkbox" id="selectAllVisible"> 
+                    <label for="selectAllVisible" style="font-size: 0.85rem; font-weight: bold; cursor: pointer;">Select All Visible</label>
+                    <span style="margin-left: 15px; font-size: 0.8rem; color: #95a5a6;" id="selectionCount">0 items selected</span>
+                </div>
+
+                <div id="skuContainer">
+                    </div>
+
+                <div class="highlight-box">
+                    <small>Combined Units Sold (Selected Items)</small>
+                    <span id="totalUnits">0</span>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>Employee Rankings (Selected Items)</h2>
+                <table>
+                    <thead><tr><th>Staff</th><th style="text-align:right">Units</th></tr></thead>
+                    <tbody id="empTable"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="grid" style="margin-top: 20px;">
+            <div class="card">
+                <h2>Top 3 Best Sellers (Whole Store)</h2>
+                <table id="globalTop3"></table>
+            </div>
+            <div class="card">
+                <h2>Staff Scorecard: <span id="staffNameDisplay" style="color:#3498db"></span></h2>
+                <div class="stat-grid">
+                    <div class="stat-item"><span class="stat-lbl">Basket Size</span><span class="stat-val" id="upt">0.0</span></div>
+                    <div class="stat-item"><span class="stat-lbl">Basket Value</span><span class="stat-val" id="atv">$0</span></div>
+                    <div class="stat-item"><span class="stat-lbl">Margin</span><span class="stat-val" id="margin">0%</span></div>
+                </div>
+                <h2>Staff Top 3 Products</h2>
+                <table id="staffTop3"></table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let data = [];
+        let products = [];
+        let staffStats = {};
+        let selectedSkus = new Set();
+        let visibleSkus = [];
+        let activeEmp = "";
+
+        document.getElementById('csvFile').addEventListener('change', function(e) {
+            Papa.parse(e.target.files[0], {
+                header: true, dynamicTyping: true, skipEmptyLines: true,
+                complete: function(results) { process(results.data); }
+            });
+        });
+
+        function process(raw) {
+            const dates = raw.map(r => new Date(r['Create Date'])).filter(d => !isNaN(d));
+            if (dates.length) {
+                const opt = { year: 'numeric', month: 'long', day: 'numeric' };
+                document.getElementById('dateRange').innerText = `Period: ${new Date(Math.min(...dates)).toLocaleDateString(undefined, opt)} - ${new Date(Math.max(...dates)).toLocaleDateString(undefined, opt)}`;
+            }
+
+            data = raw.filter(r => {
+                const e = String(r.Employee || "").trim().toUpperCase();
+                const s = String(r['Product SKU'] || "").trim().toLowerCase();
+                return e !== 'DELIVERY' && s !== 'tip' && e !== "" && s !== "";
+            });
+
+            const map = {};
+            data.forEach(r => {
+                const sku = String(r['Product SKU']);
+                if (!map[sku]) map[sku] = String(r['Product Name'] || "Unknown Item");
+            });
+            products = Object.entries(map).map(([sku, name]) => ({ sku, name })).sort((a,b) => a.sku.localeCompare(b.sku));
+
+            const groups = {};
+            data.forEach(r => {
+                const e = r.Employee;
+                if (!groups[e]) groups[e] = { u: 0, r: 0, c: 0, t: new Set() };
+                groups[e].u += (parseInt(r.Quantity) || 0);
+                groups[e].r += (r['Sold at Price'] * r.Quantity) || 0;
+                groups[e].c += (r['Cost'] * r.Quantity) || 0;
+                groups[e].t.add(r['Sale ID']);
+            });
+
+            staffStats = {};
+            for (const [n, s] of Object.entries(groups)) {
+                const tc = s.t.size || 1;
+                staffStats[n] = { name: n, units: s.u, trans: tc, rev: s.r, upt: s.u/tc, atv: s.r/tc, m: s.r>0 ? ((s.r-s.c)/s.r)*100 : 0 };
+            }
+
+            document.getElementById('toolContent').classList.remove('hidden');
+            document.getElementById('exportBtn').classList.remove('hidden');
+            renderGlobalTop3();
+            runSearch('');
+            
+            document.getElementById('skuSearch').addEventListener('input', e => runSearch(e.target.value));
+            document.getElementById('selectAllVisible').addEventListener('change', toggleAllVisible);
+            document.getElementById('exportBtn').onclick = exportToCSV;
+        }
+
+        function runSearch(term) {
+            const container = document.getElementById('skuContainer');
+            const t = term.toLowerCase();
+            
+            visibleSkus = products.filter(p => p.sku.toLowerCase().includes(t) || p.name.toLowerCase().includes(t));
+
+            container.innerHTML = visibleSkus.map(p => `
+                <div class="sku-item">
+                    <input type="checkbox" id="chk_${p.sku}" value="${p.sku}" ${selectedSkus.has(p.sku) ? 'checked' : ''} onchange="toggleSku('${p.sku}')">
+                    <label for="chk_${p.sku}"><strong>${p.sku}</strong> | ${p.name.substring(0, 70)}</label>
+                </div>
+            `).join('');
+
+            // Sync the "Select All" checkbox state
+            const allVisibleChecked = visibleSkus.length > 0 && visibleSkus.every(p => selectedSkus.has(p.sku));
+            document.getElementById('selectAllVisible').checked = allVisibleChecked;
+        }
+
+        function toggleSku(sku) {
+            if (selectedSkus.has(sku)) selectedSkus.delete(sku);
+            else selectedSkus.add(sku);
+            updateRankings();
+        }
+
+        function toggleAllVisible(e) {
+            const isChecked = e.target.checked;
+            visibleSkus.forEach(p => {
+                if (isChecked) selectedSkus.add(p.sku);
+                else selectedSkus.delete(p.sku);
+            });
+            runSearch(document.getElementById('skuSearch').value);
+            updateRankings();
+        }
+
+        function updateRankings() {
+            document.getElementById('selectionCount').innerText = `${selectedSkus.size} items selected`;
+            const counts = {};
+            Object.keys(staffStats).forEach(e => counts[e] = 0);
+            
+            let total = 0;
+            data.filter(d => selectedSkus.has(String(d['Product SKU']))).forEach(d => {
+                const q = parseInt(d.Quantity) || 0;
+                counts[d.Employee] += q;
+                total += q;
+            });
+
+            document.getElementById('totalUnits').innerText = total;
+            const sorted = Object.entries(counts).sort((a,b) => b[1] - a[1]);
+            document.getElementById('empTable').innerHTML = sorted.map(([n, q], i) => `
+                <tr onclick="showStaff('${n}')" style="cursor:pointer">
+                    <td><strong>${n}</strong></td>
+                    <td style="text-align:right"><span class="badge ${i===0 && q>0 ? 'gold' : ''}">${q}</span></td>
+                </tr>
+            `).join('');
+
+            if (sorted.length > 0 && !activeEmp) showStaff(sorted[0][0]);
+        }
+
+        function renderGlobalTop3() {
+            const c = {};
+            data.forEach(r => { const s = String(r['Product SKU']); c[s] = (c[s] || 0) + (parseInt(r.Quantity) || 0); });
+            const top = Object.entries(c).sort((a,b) => b[1]-a[1]).slice(0,3);
+            document.getElementById('globalTop3').innerHTML = top.map(([s, q], i) => `<tr><td>#${i+1}</td><td><small>${s}</small></td><td style="text-align:right"><strong>${q}</strong></td></tr>`).join('');
+        }
+
+        function showStaff(n) {
+            activeEmp = n;
+            document.getElementById('staffNameDisplay').innerText = n;
+            const s = staffStats[n] || { upt: 0, atv: 0, m: 0 };
+            document.getElementById('upt').innerText = s.upt.toFixed(2);
+            document.getElementById('atv').innerText = `$${s.atv.toFixed(0)}`;
+            document.getElementById('margin').innerText = `${s.m.toFixed(1)}%`;
+            const c = {};
+            data.filter(d => d.Employee === n).forEach(d => { const sk = String(d['Product SKU']); c[sk] = (c[sk] || 0) + (parseInt(d.Quantity) || 0); });
+            const t3 = Object.entries(c).sort((a,b) => b[1]-a[1]).slice(0,3);
+            document.getElementById('staffTop3').innerHTML = t3.map(([sk, q]) => `<tr><td><small>${sk}</small></td><td style="text-align:right"><strong>${q}</strong></td></tr>`).join('');
+        }
+
+        function exportToCSV() {
+            const rows = [["Employee", "Total Units", "Transactions", "Total Revenue", "UPT (Basket Size)", "ATV (Basket Value)", "Margin %"]];
+            Object.values(staffStats).forEach(s => { rows.push([s.name, s.units, s.trans, s.rev.toFixed(2), s.upt.toFixed(2), s.atv.toFixed(2), s.m.toFixed(2)]); });
+            let csvContent = "data:text/csv;charset=utf-8," + rows.map(e => e.join(",")).join("\n");
+            const link = document.createElement("a");
+            link.setAttribute("href", encodeURI(csvContent));
+            link.setAttribute("download", "employee_performance.csv");
+            document.body.appendChild(link);
+            link.click();
+        }
+    </script>
+</body>
+</html>
